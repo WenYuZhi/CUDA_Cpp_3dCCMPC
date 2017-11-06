@@ -551,22 +551,22 @@ __global__ void pdesolverkernel(float *T_New, float *T_Last, float *ccml, float 
 }
 class ContinuousCaster
 {
-public:
-	int section, coolsection, moldsection;
-	float *ccml;
-	ContinuousCaster(int, int, int, float*);
-	~ContinuousCaster();
-	void print();
+    public:
+		int section, coolsection, moldsection;
+		float *ccml;
+	    ContinuousCaster(int, int, int, float*);
+	    ~ContinuousCaster();
+	    void print();
 };
 
-ContinuousCaster::ContinuousCaster(int m_section, int m_coolsection, int m_moldsection, float* m_ccml)
+ContinuousCaster::ContinuousCaster(int section, int coolsection, int moldsection, float* ccml)
 {
-	section = m_section;
-	coolsection = m_coolsection;
-	moldsection = m_moldsection;
-	ccml = new float[section + 1];
+	this->section = section;
+	this->coolsection = coolsection;
+	this->moldsection = moldsection;
+	this->ccml = new float[section + 1];
 	for (int i = 0; i < section + 1; i++)
-		ccml[i] = m_ccml[i];
+		this->ccml[i] = ccml[i];
 }
 
 ContinuousCaster::~ContinuousCaster()
@@ -585,11 +585,16 @@ void ContinuousCaster::print()
 
 class Steel
 {
-public:
-	float pho;
-	float ce;
-	float lamda;
-	void physicalpara(float);
+    private:
+	    float pho;
+	    float ce;
+	    float lamda;
+    public:
+	    void physicalpara(float);
+		friend class Temperature;
+		friend class Temperature1d;
+		friend class Temperature2d;
+		friend class TemperatureGPU;
 };
 
 void Steel::physicalpara(float T)
@@ -728,10 +733,10 @@ Temperature::~Temperature()
 	delete[] meantemperature;
 }
 
-void Temperature::setvcast(float m_vcast, float m_T_Cast)
+void Temperature::setvcast(float vcast, float T_Cast)
 {
-	vcast = m_vcast;
-	T_Cast = m_T_Cast;
+	this->vcast = vcast;
+	this->T_Cast = T_Cast;
 }
 void Temperature::differencecalculation3d(float *hinit, int m_predictstep = 1)
 {
@@ -1397,7 +1402,6 @@ void Temperature::computemeantemperature3d()
 		meantemperature[i] = meantemperature[i] / count;
 		count = 0;
 	}
-
 }
 
 void Temperature::print3d(int measurednumb)
@@ -1493,7 +1497,7 @@ void Temperature::operator=(const Temperature & m_SteelTemperature)
 class TemperatureGPU:public Temperature
 {
     private:
-		float* dev_T_New, *dev_T_Last, *dev_ccml, *dev_h_init;
+		float* dev_T_New, *dev_T_Last, *dev_ccml, *dev_h_init, *dev_T_Surface;
     public:
 	    TemperatureGPU(int, int, int, int, float, float, float, float, float, ContinuousCaster &, Steel &);
 		void operator=(const TemperatureGPU & m_SteelTemperature);
@@ -1545,8 +1549,10 @@ void TemperatureGPU::operator=(const TemperatureGPU & m_SteelTemperature)
 	HANDLE_ERROR(cudaMalloc((void**)&dev_ccml, (mCasterOne->section + 1) * sizeof(float)));
 	HANDLE_ERROR(cudaMalloc((void**)&dev_h_init, mCasterOne->section * sizeof(float)));
 	HANDLE_ERROR(cudaMemcpy(dev_ccml, mCasterOne->ccml, (mCasterOne->section + 1) * sizeof(float), cudaMemcpyHostToDevice));
-	HANDLE_ERROR(cudaMemcpy(dev_T_Last, m_SteelTemperature.T_New, nx * ny * nz * sizeof(float), cudaMemcpyHostToDevice));
-	HANDLE_ERROR(cudaMemcpy(dev_T_New, m_SteelTemperature.T_New, nx * ny * nz * sizeof(float), cudaMemcpyHostToDevice));
+	if(disout)
+	    HANDLE_ERROR(cudaMemcpy(dev_T_Last, m_SteelTemperature.T_New, nx * ny * nz * sizeof(float), cudaMemcpyHostToDevice));
+	else
+	    HANDLE_ERROR(cudaMemcpy(dev_T_New, m_SteelTemperature.T_New, nx * ny * nz * sizeof(float), cudaMemcpyHostToDevice));
 }
 
 TemperatureGPU::~TemperatureGPU()
@@ -2665,7 +2671,6 @@ int main()
 	float* T_init = new float[nx * ny * nz];
 	for (int i = 0; i < nx * ny * nz; i++)
 		T_init[i] = T_Cast;
-	TemperatureGPU SteelTemperature3dplantGPU = TemperatureGPU(nx, ny, nz, tnpts, tf, lx, ly, lz, vcast, CasterOne, steel);
 	TemperatureGPU SteelTemperature3dmodelGPU = TemperatureGPU(nx, ny, nz, tnpts, tf, lx, ly, lz, vcast, CasterOne, steel);
 	TemperatureGPU SteelTemperature3dtempGPU = TemperatureGPU(nx, ny, nz, tnpts, tf, lx, ly, lz, vcast, CasterOne, steel);
 
@@ -2674,26 +2679,24 @@ int main()
 		allmeantemperature[i] = new float[CasterOne.coolsection];
 	staticmeantemperature = new float[CasterOne.coolsection];
 
-	SteelTemperature3dplantGPU.initcondition3d(T_init);
-	SteelTemperature3dplantGPU.setvcast(vcast, T_Cast);
-	while (SteelTemperature3dplantGPU.tstep <= sim_tnpts)
+	SteelTemperature3dmodelGPU.initcondition3d(T_init);
+	SteelTemperature3dmodelGPU.setvcast(vcast, T_Cast);
+	while (SteelTemperature3dmodelGPU.tstep <= sim_tnpts)
 	{
-		if (SteelTemperature3dplantGPU.tstep % 1000 == 0)
+		if (SteelTemperature3dmodelGPU.tstep % 100 == 0)
 		{
-			SteelTemperature3dplantGPU.computemeantemperature3d();
-			SteelTemperature3dplantGPU.print3d();
+			SteelTemperature3dmodelGPU.computemeantemperature3d();
+			SteelTemperature3dmodelGPU.print3d();
 		}
-		SteelTemperature3dplantGPU.differencecalculation3d(hinit);
+		SteelTemperature3dmodelGPU.differencecalculation3d(hinit);
 	}
 
-	SteelTemperature3dtempGPU = SteelTemperature3dplantGPU;
-	SteelTemperature3dmodelGPU = SteelTemperature3dplantGPU;
-
+	SteelTemperature3dtempGPU = SteelTemperature3dmodelGPU;
 	vcast = -0.03f;
-	while (SteelTemperature3dplantGPU.tstep < tnpts && SteelTemperature3dplantGPU.tstep > sim_tnpts)
+	while (SteelTemperature3dmodelGPU.tstep < tnpts && SteelTemperature3dmodelGPU.tstep > sim_tnpts)
 	{
 		SteelTemperature3dmodelGPU.setvcast(vcast, T_Cast);
-		if (SteelTemperature3dplantGPU.tstep % 10 == 0)
+		if (SteelTemperature3dmodelGPU.tstep % 10 == 0)
 		{
 			for (int i = 0; i < CasterOne.coolsection + 1; i++)
 			{
@@ -2725,15 +2728,13 @@ int main()
 			Gradientmethod.gradientcalculation();
 			Gradientmethod.linesearch();
 			Gradientmethod.updateh(hinit);
-			if (SteelTemperature3dplantGPU.tstep % 100 == 0)
+			if (SteelTemperature3dmodelGPU.tstep % 100 == 0)
 			{
 				Gradientmethod.print();
-				cout << "tstep = " << SteelTemperature3dplantGPU.tstep << endl;
+				cout << "tstep = " << SteelTemperature3dmodelGPU.tstep << endl;
 			}
 		}
-		SteelTemperature3dplantGPU.differencecalculation3d(hinit);
 		SteelTemperature3dmodelGPU.differencecalculation3d(hinit);
-		SteelTemperature3dplantGPU.computemeantemperature3d();
 		SteelTemperature3dmodelGPU.computemeantemperature3d();
 	}
 	clock_t t_end = clock();
