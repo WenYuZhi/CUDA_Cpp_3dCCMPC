@@ -9,6 +9,52 @@
 #include "book.h"
 
 using namespace std;
+
+class Mesh
+{
+public:
+	int nx, ny, nz;
+	int tnpts;
+	float lx, ly, lz;
+	float tf;
+	float dx, dy, dz;
+	float tao;
+	Mesh(int, int, int, int, float, float, float, float);
+	void print();
+};
+
+Mesh::Mesh(int m_nx, int m_ny, int m_nz, int m_tnpts, float m_tf, float m_lx, float m_ly, float m_lz)
+{
+	nx = m_nx;
+	ny = m_ny;
+	nz = m_nz;
+	tnpts = m_tnpts;
+	tf = m_tf;
+	lx = m_lx;
+	ly = m_ly;
+	lz = m_lz;
+	dx = m_lx / float(m_nx - 1);
+	dy = m_ly / float(m_ny - 1);
+	dz = m_lz / float(m_nz - 1);
+	tao = m_tf / float(m_tnpts - 1);
+}
+
+void Mesh::print()
+{
+	cout << "nx = " << nx << ", ";
+	cout << "ny = " << ny << ", ";
+	cout << "nz = " << nz << ", ";
+	cout << "lx = " << lx << ", ";
+	cout << "ly = " << ly << ", ";
+	cout << "lz = " << lz << ", ";
+	cout << "dx = " << dx << ", ";
+	cout << "dy = " << dy << ", ";
+	cout << "dz = " << dz << ", ";
+	cout << "tnpts = " << tnpts << ", ";
+	cout << "tao = " << tao << ", ";
+	cout << "tf = " << tf << ", ";
+}
+
 __device__ void Physicial_Parameters(float T, float *pho, float *Ce, float *lamd)
 {
 	float Ts = 1462.0, Tl = 1518.0, lamds = 30, lamdl = 50, phos = 7000, phol = 7500, ce = 540.0, L = 265600.0, fs = 0.0;
@@ -643,7 +689,7 @@ public:
 	int tstep;
 	float* meantemperature;
 	float* computetemperature;
-	Temperature(int, int, int, int, float, float, float, float, float, ContinuousCaster &, Steel &);
+	Temperature(Mesh &, float, ContinuousCaster &, Steel &);
 	Temperature(const Temperature &);
 	~Temperature();
 	void differencecalculation3d(float*, int);
@@ -659,22 +705,22 @@ public:
 	friend class Gradientbasedalgorithm;
 };
 
-Temperature::Temperature(int m_nx, int m_ny, int m_nz, int m_tnpts, float m_tf, float m_lx, float m_ly, float m_lz, float m_vcast, ContinuousCaster & m_CasterOne, Steel & m_steel)
+Temperature::Temperature(Mesh & mesh, float m_vcast, ContinuousCaster & m_CasterOne, Steel & m_steel)
 {
 	mCasterOne = &m_CasterOne;
 	steel = &m_steel;
-	nx = m_nx;
-	ny = m_ny;
-	nz = m_nz;
-	tnpts = m_tnpts;
-	tf = m_tf;
-	lx = m_lx;
-	ly = m_ly;
-	lz = m_lz;
-	dx = m_lx / float(m_nx - 1);
-	dy = m_ly / float(m_ny - 1);
-	dz = m_lz / float(m_nz - 1);
-	tao = m_tf / float(m_tnpts - 1);
+	nx = mesh.nx;
+	ny = mesh.ny;
+	nz = mesh.nz;
+	tnpts = mesh.tnpts;
+	tf = mesh.tf;
+	lx = mesh.lx;
+	ly = mesh.ly;
+	lz = mesh.lz;
+	dx = mesh.dx;
+	dy = mesh.dy;
+	dz = mesh.dz;
+	tao = mesh.tao;
 	T_New = new float[nx * ny * nz];
 	T_Last = new float[nx * ny * nz];
 	T_Surface = new float[ny];
@@ -682,7 +728,6 @@ Temperature::Temperature(int m_nx, int m_ny, int m_nz, int m_tnpts, float m_tf, 
 	vcast = m_vcast;
 	tstep = 0;
 	disout = true;
-
 }
 
 Temperature::Temperature(const Temperature & m_SteelTemperature)
@@ -1499,7 +1544,7 @@ class TemperatureGPU:public Temperature
     private:
 		float* dev_T_New, *dev_T_Last, *dev_ccml, *dev_h_init, *dev_T_Surface;
     public:
-	    TemperatureGPU(int, int, int, int, float, float, float, float, float, ContinuousCaster &, Steel &);
+	    TemperatureGPU(Mesh & mesh, float, ContinuousCaster &, Steel &);
 		void operator=(const TemperatureGPU & m_SteelTemperature);
 	    ~TemperatureGPU();
 		void initcondition3d(float*);
@@ -1507,7 +1552,7 @@ class TemperatureGPU:public Temperature
 	    friend class Gradientbasedalgorithm;
 };
 
-TemperatureGPU::TemperatureGPU(int m_nx, int m_ny, int m_nz, int m_tnpts, float m_tf, float m_lx, float m_ly, float m_lz, float m_vcast, ContinuousCaster & m_CasterOne, Steel & m_steel):Temperature(m_nx, m_ny, m_nz, m_tnpts, m_tf, m_lx, m_ly, m_lz, m_vcast, m_CasterOne, m_steel)
+TemperatureGPU::TemperatureGPU(Mesh & mesh, float m_vcast, ContinuousCaster & m_CasterOne, Steel & m_steel):Temperature(mesh, m_vcast, m_CasterOne, m_steel)
 {
 	HANDLE_ERROR(cudaSetDevice(0));
 	HANDLE_ERROR(cudaMalloc((void**)&dev_T_New, nx * ny * nz * sizeof(float)));
@@ -2667,12 +2712,13 @@ int main()
 	lz = 0.25;
 	tnpts = 20001;
 	tf = 4000.0f;
-	sim_tnpts = 10001;
+	sim_tnpts = 20001;
 	float* T_init = new float[nx * ny * nz];
 	for (int i = 0; i < nx * ny * nz; i++)
 		T_init[i] = T_Cast;
-	TemperatureGPU SteelTemperature3dmodelGPU = TemperatureGPU(nx, ny, nz, tnpts, tf, lx, ly, lz, vcast, CasterOne, steel);
-	TemperatureGPU SteelTemperature3dtempGPU = TemperatureGPU(nx, ny, nz, tnpts, tf, lx, ly, lz, vcast, CasterOne, steel);
+	Mesh MeshOne = Mesh(nx, ny, nz, tnpts, tf, lx, ly, lz);
+	TemperatureGPU SteelTemperature3dmodelGPU = TemperatureGPU(MeshOne, vcast, CasterOne, steel);
+	TemperatureGPU SteelTemperature3dtempGPU = TemperatureGPU(MeshOne, vcast, CasterOne, steel);
 
 	allmeantemperature = new float*[CasterOne.coolsection];
 	for (int i = 0; i < CasterOne.coolsection; i++)
@@ -2683,7 +2729,7 @@ int main()
 	SteelTemperature3dmodelGPU.setvcast(vcast, T_Cast);
 	while (SteelTemperature3dmodelGPU.tstep <= sim_tnpts)
 	{
-		if (SteelTemperature3dmodelGPU.tstep % 100 == 0)
+		if (SteelTemperature3dmodelGPU.tstep % 1000 == 0)
 		{
 			SteelTemperature3dmodelGPU.computemeantemperature3d();
 			SteelTemperature3dmodelGPU.print3d();
